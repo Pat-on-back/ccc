@@ -185,51 +185,65 @@ class ClusterData(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> Data:
         # 获取第 idx 个子图的数据
-        node_start = int(self.partition.partptr[idx])
-        node_end = int(self.partition.partptr[idx + 1])
-        node_length = node_end - node_start
-
+        node_start = int(self.partition.partptr[idx])  
+        node_end = int(self.partition.partptr[idx + 1]) 
+        node_length = node_end - node_start  # 计算当前子图包含的节点数
+    
+        # 获取当前子图的边指针（indptr），用于获取子图的边
         indptr = self.partition.indptr[node_start:node_end + 1]
-        edge_start = int(indptr[0])
-        edge_end = int(indptr[-1])
-        edge_length = edge_end - edge_start
-        indptr = indptr - edge_start
-
+        edge_start = int(indptr[0])  
+        edge_end = int(indptr[-1]) 
+        edge_length = edge_end - edge_start  # 计算当前子图包含的边数
+        indptr = indptr - edge_start  
+    
+        # 根据稀疏矩阵格式（CSR 或 CSC）处理边信息
         if self.sparse_format == 'csr':
+            # 如果是 CSR 格式，将 indptr 转换为行索引
             row = ptr2index(indptr)
-            col = self.partition.index[edge_start:edge_end]
+            col = self.partition.index[edge_start:edge_end]  
             if not self.keep_inter_cluster_edges:
-                edge_mask = (col >= node_start) & (col < node_end)
-                row = row[edge_mask]
-                col = col[edge_mask] - node_start
+                # 如果不保留集群间的边，过滤掉不属于当前子图的边
+                edge_mask = (col >= node_start) & (col < node_end) # 找出当前子图的边
+                row = row[edge_mask]  # 保留有效的行索引
+                col = col[edge_mask] - node_start  # 保留有效的列索引并重新映射节点编号
         else:
+            # 如果是 CSC 格式，将 indptr 转换为列索引
             col = ptr2index(indptr)
-            row = self.partition.index[edge_start:edge_end]
+            row = self.partition.index[edge_start:edge_end]  
             if not self.keep_inter_cluster_edges:
-                edge_mask = (row >= node_start) & (row < node_end)
-                col = col[edge_mask]
-                row = row[edge_mask] - node_start
-
+                # 如果不保留集群间的边，过滤掉不属于当前子图的边
+                edge_mask = (row >= node_start) & (row < node_end) 
+                col = col[edge_mask]  # 保留有效的列索引
+                row = row[edge_mask] - node_start  # 保留有效的行索引并重新映射节点编号
+    
         out = copy.copy(self.data)
-
+    
+        # 对节点和边的属性进行相应的切片处理
         for key, value in self.data.items():
             if key == 'num_nodes':
-                out.num_nodes = node_length
+                out.num_nodes = node_length  # 设置子图的节点数
             elif self.data.is_node_attr(key):
-                cat_dim = self.data.__cat_dim__(key, value)
-                out[key] = narrow(value, cat_dim, node_start, node_length)
+                # 如果是节点属性，进行节点维度的切片操作
+                cat_dim = self.data.__cat_dim__(key, value)  # 获取该属性的维度
+                out[key] = narrow(value, cat_dim, node_start, node_length)  # 截取节点数据
             elif self.data.is_edge_attr(key):
-                cat_dim = self.data.__cat_dim__(key, value)
-                out[key] = narrow(value, cat_dim, edge_start, edge_length)
+                # 如果是边属性，进行边维度的切片操作
+                cat_dim = self.data.__cat_dim__(key, value)  # 获取该属性的维度
+                out[key] = narrow(value, cat_dim, edge_start, edge_length)  # 截取边数据
                 if not self.keep_inter_cluster_edges:
+                    # 如果不保留集群间的边，过滤掉不属于当前子图的边
                     out[key] = out[key][edge_mask]
+    
+        # 构造并更新边的索引
+        out.edge_index = torch.stack([row, col], dim=0) 
+    
+        return out  # 返回当前子图的数据对象
 
-        out.edge_index = torch.stack([row, col], dim=0)
 
-        return out
+def __repr__(self) -> str:
+    # 返回类的字符串表示，便于打印和调试
+    return f'{self.__class__.__name__}({self.num_parts})'  # 打印该对象的类名和划分数
 
-    def __repr__(self) -> str:
-        return f'{self.__class__.__name__}({self.num_parts})'
 
 
 class ClusterLoader(torch.utils.data.DataLoader):
