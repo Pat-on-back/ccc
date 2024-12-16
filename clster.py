@@ -248,80 +248,103 @@ def __repr__(self) -> str:
 
 class ClusterLoader(torch.utils.data.DataLoader):
     """
-    .. note::
-        请配合 `ClusterData` 和 `ClusterLoader` 一起使用，以形成小批量。
-        示例可参考 `examples/cluster_gcn_reddit.py` 或 `examples/cluster_gcn_ppi.py`。
-
-    参数:
-        cluster_data (torch_geometric.loader.ClusterData): 已经划分好的数据对象。
-        **kwargs (可选): 其他 DataLoader 的参数，比如 `batch_size`、`shuffle`、`drop_last` 等。
+    基于 'Cluster-GCN' 论文提出的图划分数据加载器，将多个划分后的子图及其集群间的边连接组合成一个小批量。
+    请配合 `ClusterData` 和 `ClusterLoader` 一起使用，以形成小批量。
     """
+    
     def __init__(self, cluster_data, **kwargs):
-        self.cluster_data = cluster_data
-        iterator = range(len(cluster_data))
+        """
+        初始化 ClusterLoader。
+        
+        参数:
+        - cluster_data (ClusterData): 已经划分好的数据对象。
+        - **kwargs: 传递给 DataLoader 的其他参数（如 batch_size、shuffle、drop_last 等）。
+        """
+        self.cluster_data = cluster_data  # 存储传入的 ClusterData 对象
+        
+        # 创建迭代器，方便从 cluster_data 中获取数据
+        iterator = range(len(cluster_data))  
+        
+        # 调用父类（DataLoader）的初始化方法，设置迭代器、批处理函数等
         super().__init__(iterator, collate_fn=self._collate, **kwargs)
 
     def _collate(self, batch: List[int]) -> Data:
-        # 拼接当前批次的所有子图数据，并计算新的边连接
+        """
+        处理批次数据，将当前批次的子图数据拼接起来，并计算新的边连接。
+        
+        参数:
+        - batch (List[int]): 当前小批量中包含的子图索引。
+        
+        返回:
+        - Data: 组合成的新图数据对象，包含拼接后的节点、边信息。
+        """
+        
+        # 如果 batch 不是 Tensor 类型，则转换为 Tensor 类型
         if not isinstance(batch, torch.Tensor):
             batch = torch.tensor(batch)
 
-        global_indptr = self.cluster_data.partition.indptr
-        global_index = self.cluster_data.partition.index
-
-        # 获取当前小批量中节点和边的起止索引
-        node_start = self.cluster_data.partition.partptr[batch]
-        node_end = self.cluster_data.partition.partptr[batch + 1]
-        edge_start = global_indptr[node_start]
-        edge_end = global_indptr[node_end]
-
+        # 从 cluster_data 中获取全局的节点和边信息
+        global_indptr = self.cluster_data.partition.indptr  # 每个节点的边的起始位置
+        global_index = self.cluster_data.partition.index  # 所有边的目标节点索引
+        
+        # 获取当前批次中每个子图的节点和边的起始与结束位置
+        node_start = self.cluster_data.partition.partptr[batch]  # 节点的起始位置
+        node_end = self.cluster_data.partition.partptr[batch + 1]  # 节点的结束位置
+        edge_start = global_indptr[node_start]  # 边的起始位置
+        edge_end = global_indptr[node_end]  # 边的结束位置
+        
+        # 存储拼接后的行和列索引，以及节点信息
         rows, cols, nodes, cumsum = [], [], [], 0
+
+        # 遍历当前批次中的每个子图
         for i in range(batch.numel()):
-            nodes.append(torch.arange(node_start[i], node_end[i]))
+            nodes.append(torch.arange(node_start[i], node_end[i]))  # 获取当前子图的节点索引
+            # 获取当前子图的边的偏移量
             indptr = global_indptr[node_start[i]:node_end[i] + 1]
-            indptr = indptr - edge_start[i]
+            indptr = indptr - edge_start[i]  # 归一化偏移量
+            
+            # 根据稀疏格式（CSR 或 CSC）处理边的索引
             if self.cluster_data.partition.sparse_format == 'csr':
-                row = ptr2index(indptr) + cumsum
-                col = global_index[edge_start[i]:edge_end[i]]
+                row = ptr2index(indptr) + cumsum  # 获取行索引，并加上累计的边数偏移
+                col = global_index[edge_start[i]:edge_end[i]]  # 获取列索引
             else:
-                col = ptr2index(indptr) + cumsum
-                row = global_index[edge_start[i]:edge_end[i]]
+                col = ptr2index(indptr) + cumsum  # 获取列索引，并加上累计的边数偏移
+                row = global_index[edge_start[i]:edge_end[i]]  # 获取行索引
 
-            rows.append(row)
-            cols.append(col)
-            cumsum += indptr.numel() - 1
+            rows.append(row)  # 添加行索引
+            cols.append(col)  # 添加列索引
+            cumsum += indptr.numel() - 1  # 更新累计的边数（用于计算新的边索引）
 
-        node = torch.cat(nodes, dim=0)
-        row = torch.cat(rows, dim=0)
-        col = torch.cat(cols, dim=0)
+        # 拼接所有节点、行和列索引
+        node = torch.cat(nodes, dim=0)  # 拼接节点
+        row = torch.cat(rows, dim=0)  # 拼接行索引
+        col = torch.cat(cols, dim=0)  # 拼接列索引
 
         # 仅保留连接同一子图的边
         if self.cluster_data.partition.sparse_format == 'csr':
-            col, edge_mask = map_index(col, node)
-            row = row[edge_mask]
+            col, edge_mask = map_index(col, node)  # 获取同一子图内的边
+            row = row[edge_mask]  # 过滤出有效的行索引
         else:
-            row, edge_mask = map_index(row, node)
-            col = col[edge_mask]
+            row, edge_mask = map_index(row, node)  # 获取同一子图内的边
+            col = col[edge_mask]  # 过滤出有效的列索引
+
+        # 创建一个新的图数据对象，包含子图的数据
         out = copy.copy(self.cluster_data.data)
 
-        # 根据偏移量对节点和边属性进行切片
+        # 根据子图的偏移量对节点和边属性进行切片
         for key, value in self.cluster_data.data.items():
             if key == 'num_nodes':
-                out.num_nodes = cumsum
+                out.num_nodes = cumsum  # 设置节点数
             elif self.cluster_data.data.is_node_attr(key):
+                # 如果是节点属性，进行节点维度的切片操作
                 cat_dim = self.cluster_data.data.__cat_dim__(key, value)
-                out[key] = torch.cat([
-                    narrow(out[key], cat_dim, s, e - s)
-                    for s, e in zip(node_start, node_end)
-                ], dim=cat_dim)
+                out[key] = torch.cat([narrow(out[key], cat_dim, s, e - s) for s, e in zip(node_start, node_end)], dim=cat_dim)
             elif self.cluster_data.data.is_edge_attr(key):
+                # 如果是边属性，进行边维度的切片操作
                 cat_dim = self.cluster_data.data.__cat_dim__(key, value)
-                value = torch.cat([
-                    narrow(out[key], cat_dim, s, e - s)
-                    for s, e in zip(edge_start, edge_end)
-                ], dim=cat_dim)
-                out[key] = select(value, edge_mask, dim=cat_dim)
+                value = torch.cat([narrow(out[key], cat_dim, s, e - s) for s, e in zip(edge_start, edge_end)], dim=cat_dim)
+                out[key] = select(value, edge_mask, dim=cat_dim)  # 只保留有效的边属性
 
-        out.edge_index = torch.stack([row, col], dim=0)
-
-        return out
+        # 更新边的索引，并返回最终的数据对象
+        out.edge_index = torch.stack([row, col], dim=0)  # 拼接成边的索引
+        return out  # 返回当前批次的图数据对象
