@@ -338,11 +338,13 @@ class ClusterLoader(torch.utils.data.DataLoader):
             elif self.cluster_data.data.is_node_attr(key):
                 # 如果是节点属性，进行节点维度的切片操作
                 cat_dim = self.cluster_data.data.__cat_dim__(key, value)
-                out[key] = torch.cat([narrow(out[key], cat_dim, s, e - s) for s, e in zip(node_start, node_end)], dim=cat_dim)
+                out[key] = torch.cat([narrow(out[key], cat_dim, s, e - s) 
+                                      for s, e in zip(node_start, node_end)], dim=cat_dim)
             elif self.cluster_data.data.is_edge_attr(key):
                 # 如果是边属性，进行边维度的切片操作
                 cat_dim = self.cluster_data.data.__cat_dim__(key, value)
-                value = torch.cat([narrow(out[key], cat_dim, s, e - s) for s, e in zip(edge_start, edge_end)], dim=cat_dim)
+                value = torch.cat([narrow(out[key], cat_dim, s, e - s) 
+                                   for s, e in zip(edge_start, edge_end)], dim=cat_dim)
                 out[key] = select(value, edge_mask, dim=cat_dim)  # 只保留有效的边属性
 
         # 更新边的索引，并返回最终的数据对象
