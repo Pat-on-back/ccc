@@ -29,6 +29,7 @@ class Partition:
 
 
 class ClusterData(torch.utils.data.Dataset):
+    """
     .. note::
         底层的 METIS 算法要求输入图为无向图。
 
