@@ -26,16 +26,14 @@ from torch_geometric.typing import InputNodes, OptTensor
 
 
 class NodeLoader(
-        torch.utils.data.DataLoader,  # 继承DataLoader，提供数据加载功能
-        AffinityMixin,  # 混入AffinityMixin，可能用于CPU亲和性配置
-        MultithreadingMixin,  # 混入MultithreadingMixin，支持多线程
-        LogMemoryMixin,  # 混入LogMemoryMixin，可能用于内存日志记录
+        torch.utils.data.DataLoader,  
+        AffinityMixin,  
+        MultithreadingMixin,  
+        LogMemoryMixin,  
 ):
-    r"""NodeLoader：从节点信息中执行小批量采样的加载器，使用通用的BaseSampler采样器。
-    """
     def __init__(
         self,
-        data: Union[Data, HeteroData, Tuple[FeatureStore, GraphStore]],  # 输入数据，可以是Data或HeteroData对象，或包含FeatureStore和GraphStore的元组
+        data: Union[Data, HeteroData, Tuple[FeatureStore, GraphStore]],  # 输入数据
         node_sampler: BaseSampler,  # 采样器，必须实现`sample_from_nodes`方法
         input_nodes: InputNodes = None,  # 采样的起始节点，默认情况下所有节点都参与
         input_time: OptTensor = None,  # 可选，输入节点的时间戳（如果有）
@@ -83,7 +81,8 @@ class NodeLoader(
         r"""从输入节点批次中采样子图。"""
         out = self.collate_fn(index)  # 通过collate_fn采样子图
         if not self.filter_per_worker:
-            out = self.filter_fn(out)  # 如果不在工作进程中过滤数据，则在主进程中执行过滤
+            out = self.filter_fn(out)  # 如果不在工作进程中过滤数据，
+                                       # 则在主进程中执行过滤
         return out
 
     def collate_fn(self, index: Union[Tensor, List[int]]) -> Any:
@@ -134,13 +133,13 @@ class NodeLoader(
             data.num_sampled_edges = out.num_sampled_edges  # 设置采样边数
 
             if out.orig_row is not None and out.orig_col is not None:
-                data._orig_edge_index = torch.stack([out.orig_row, out.orig_col], dim=0)  # 设置原始边索引
+                data._orig_edge_index = torch.stack([out.orig_row, out.orig_col], dim=0) 
 
             data.input_id = out.metadata[0]  # 设置输入ID
             data.seed_time = out.metadata[1]  # 设置时间戳
             data.batch_size = out.metadata[0].size(0)  # 设置批次大小
 
-        elif isinstance(out, HeteroSamplerOutput):  # 如果输出是HeteroSamplerOutput类型
+        elif isinstance(out, HeteroSamplerOutput):  
             if isinstance(self.data, HeteroData):
                 data = filter_hetero_data(  # 过滤并返回HeteroData对象
                     self.data, out.node, out.row, out.col, out.edge,
@@ -159,44 +158,50 @@ class NodeLoader(
                         *self.data, out.node, out.row, out.col, out.edge,
                         self.custom_cls)
 
+            # 如果采样结果中的节点 (out.node) 不包含 'n_id' 字段，则为每个节点添加 'n_id'
             for key, node in out.node.items():
-                if 'n_id' not in data[key]:
-                    data[key].n_id = node
-
-            for key, edge in (out.edge or {}).items():
-                if edge is not None and 'e_id' not in data[key]:
-                    edge = edge.to(torch.long)
+                if 'n_id' not in data[key]:  
+                    data[key].n_id = node  # 设置 'n_id' 为采样节点的 ID
+            
+            # 对采样结果中的边 (out.edge) 进行处理，确保边数据包含 'e_id'
+            for key, edge in (out.edge or {}).items():  
+                if edge is not None and 'e_id' not in data[key]:  
+                    edge = edge.to(torch.long)  
+            
+                    # 如果采样器提供了边的重新排列信息（edge_permutation），则应用该重新排列
                     perm = self.node_sampler.edge_permutation
                     if perm is not None and perm.get(key, None) is not None:
-                        edge = perm[key][edge]
-                    data[key].e_id = edge
-
-            data.set_value_dict('batch', out.batch)
-            data.set_value_dict('num_sampled_nodes', out.num_sampled_nodes)
-            data.set_value_dict('num_sampled_edges', out.num_sampled_edges)
-
+                        edge = perm[key][edge]  
+            
+                    data[key].e_id = edge  # 设置 'e_id' 为采样边的 ID
+            
+            # 设置 'batch'、'num_sampled_nodes' 和 'num_sampled_edges' 信息
+            data.set_value_dict('batch', out.batch)  # 设置批次信息
+            data.set_value_dict('num_sampled_nodes', out.num_sampled_nodes) 
+            data.set_value_dict('num_sampled_edges', out.num_sampled_edges)  
+            
+            # 如果采样结果包含原始的边索引 (orig_row 和 orig_col)，则将其添加到数据中
             if out.orig_row is not None and out.orig_col is not None:
-                for key in out.orig_row.keys():
-                    data[key]._orig_edge_index = torch.stack([out.orig_row[key], out.orig_col[key]], dim=0)
-
-            input_type = self.input_data.input_type
-            data[input_type].input_id = out.metadata[0]
-            data[input_type].seed_time = out.metadata[1]
-            data[input_type].batch_size = out.metadata[0].size(0)
-
+                for key in out.orig_row.keys():  #
+                    data[key]._orig_edge_index = torch.stack([out.orig_row[key], out.orig_col[key]], dim=0)  
+    
+            
+            # 获取输入数据类型
+            input_type = self.input_data.input_type  
+            
+            # 将采样结果的元数据（如输入ID和时间）添加到数据中
+            data[input_type].input_id = out.metadata[0]  # 设置输入节点 ID
+            data[input_type].seed_time = out.metadata[1]  # 设置种子时间
+            data[input_type].batch_size = out.metadata[0].size(0)  # 设置批次大小
+            
+        # 如果数据类型不符合预期，抛出类型错误
         else:
-            raise TypeError(f"'{self.__class__.__name__}'' found invalid "
-                             f"type: '{type(out)}'")
-
-        # 如果有自定义的transform函数，则返回转换后的数据
+            raise TypeError(f"'{self.__class__.__name__}' found invalid type: '{type(out)}'")
+        
+        # 如果有自定义的转换函数（transform），则返回转换后的数据
+        # 否则返回原始的数据
         return data if self.transform is None else self.transform(data)
 
-    def _get_iterator(self) -> Iterator:
-        if self.filter_per_worker:
-            return super()._get_iterator()
-
-        # 如果不在工作进程中过滤数据，返回DataLoaderIterator
-        return DataLoaderIterator(super()._get_iterator(), self.filter_fn)
 
     def __repr__(self) -> str:
         return f'{self.__class__.__name__}()'
