@@ -36,10 +36,8 @@ class Collater:
     def __call__(self, batch: List[Any]) -> Any:
         """
         根据batch中数据的类型选择合适的合并方式。
-
         参数：
         - batch: 一个包含多个样本的数据列表。
-
         返回：
         - 返回合并后的批数据。
         """
