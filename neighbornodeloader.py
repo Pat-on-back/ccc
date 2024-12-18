@@ -1,12 +1,9 @@
 from typing import Callable, Dict, List, Optional, Tuple, Union
-# 导入类型定义
-
 from torch_geometric.data import Data, FeatureStore, GraphStore, HeteroData
 from torch_geometric.loader.node_loader import NodeLoader
 from torch_geometric.sampler import NeighborSampler
 from torch_geometric.sampler.base import SubgraphType
 from torch_geometric.typing import EdgeType, InputNodes, OptTensor
-# 导入 PyTorch Geometric 中的相关模块和类型
 
 class NeighborLoader(NodeLoader):
     r"""邻居采样器，用于大规模图的图神经网络 (GNN) 训练，进行小批量训练
@@ -15,7 +12,7 @@ class NeighborLoader(NodeLoader):
 
     这个采样器逐步为每个节点采样邻居，以避免内存消耗过大，适用于大规模图的训练。
 
-    :param data: 输入的数据，支持 `Data`、`HeteroData` 或 (`FeatureStore`, `GraphStore`) 类型。
+    :param data: 输入的数据，支持 `Data`、`HeteroData` 类型。
     :param num_neighbors: 每一轮采样时，每个节点的邻居数量
     :param input_nodes: 初始的输入节点，指定从哪些节点开始进行邻居采样。
     :param input_time: 可选，指定输入节点的时间戳。
