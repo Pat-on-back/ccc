@@ -7,9 +7,6 @@ from torch_geometric.typing import EdgeType, InputEdges, OptTensor
 
 
 class LinkNeighborLoader(LinkLoader):
-    r"""基于链接的数据加载器，它继承自节点类型的数据加载器 :class:`torch_geometric.loader.NeighborLoader`。
-    该加载器支持对大规模图进行小批量训练，避免了全批量训练的内存问题。
-    """
     def __init__(
       self,
       data: Union[Data, HeteroData, Tuple[FeatureStore, GraphStore]],  # 输入的图数据
