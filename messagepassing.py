@@ -738,31 +738,49 @@ class MessagePassing(torch.nn.Module):
         inputs: Tensor,
         dim_size: Optional[int],
     ) -> Tensor:
-        # NOTE Replace this method in custom explainers per message-passing
-        # layer to customize how messages shall be explained, e.g., via:
+        # 这个方法的目的是提供一种可解释性的机制来解释图神经网络中消息传递过程。
+        # 例如，可以自定义消息传递层中的消息如何解释。
+        # 在实际应用中，你可能会在自定义的解释器中重写此方法，来定义如何通过边掩码解释消息。
+        # 例如，可以在某个卷积层上使用如下方法：
         # conv.explain_message = explain_message.__get__(conv, MessagePassing)
-        # see stackoverflow.com: 394770/override-a-method-at-instance-level
+        # 参见：https://stackoverflow.com/394770/override-a-method-at-instance-level
+    
+        # 获取边掩码（edge_mask），边掩码用于解释消息传递过程中的每一条边的作用
         edge_mask = self._edge_mask
-
+    
+        # 如果没有找到预定义的 `edge_mask`，则抛出异常
+        # 这意味着在进行解释时没有找到必需的边掩码。
         if edge_mask is None:
             raise ValueError("Could not find a pre-defined 'edge_mask' "
                              "to explain. Did you forget to initialize it?")
-
+    
+        # 如果启用了 sigmoid 激活函数（例如在计算掩码时），则对 `edge_mask` 进行 sigmoid 操作。
+        # 这通常是为了将掩码值映射到 (0, 1) 的范围内，表示每条边的重要性。
         if self._apply_sigmoid:
             edge_mask = edge_mask.sigmoid()
-
-        # Some ops add self-loops to `edge_index`. We need to do the same for
-        # `edge_mask` (but do not train these entries).
+    
+        # 一些操作会向 `edge_index` 添加自环（self-loops）。如果是这种情况，
+        # 我们需要在 `edge_mask` 上也做类似的操作（添加自环），
+        # 但是这些自环的掩码值不应参与训练（即固定为 1）。
         if inputs.size(self.node_dim) != edge_mask.size(0):
-            assert dim_size is not None
-            edge_mask = edge_mask[self._loop_mask]
-            loop = edge_mask.new_ones(dim_size)
-            edge_mask = torch.cat([edge_mask, loop], dim=0)
+            # 如果输入张量的节点维度和边掩码的大小不匹配，说明有自环被添加
+            assert dim_size is not None  # 确保 `dim_size` 不为 None
+            edge_mask = edge_mask[self._loop_mask]  # 选择自环的边掩码
+            loop = edge_mask.new_ones(dim_size)  # 创建一个新的与 `dim_size` 形状匹配的全 1 张量
+            edge_mask = torch.cat([edge_mask, loop], dim=0)  # 将自环掩码与新的全 1 掩码拼接
+    
+        # 确保节点的维度大小与边掩码大小一致
         assert inputs.size(self.node_dim) == edge_mask.size(0)
-
+    
+        # 创建一个形状为 `[1] * inputs.dim()` 的大小列表，除了节点维度，其他维度为 1
         size = [1] * inputs.dim()
-        size[self.node_dim] = -1
+        size[self.node_dim] = -1  # 设置节点维度为 -1，这样后面就可以广播
+    
+        # 将输入张量与边掩码相乘，生成带有边掩码的消息。
+        # `edge_mask.view(size)` 会将边掩码调整为与输入张量大小相匹配的形状，
+        # 然后将输入与掩码逐元素相乘，从而筛选出对应边的消息。
         return inputs * edge_mask.view(size)
+
 
     # Hooks ###################################################################
 
@@ -770,148 +788,139 @@ class MessagePassing(torch.nn.Module):
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward pre-hook on the module.
-
-        The hook will be called every time before :meth:`propagate` is invoked.
-        It should have the following signature:
-
-        .. code-block:: python
-
-            hook(module, inputs) -> None or modified input
-
-        The hook can modify the input.
-        Input keyword arguments are passed to the hook as a dictionary in
-        :obj:`inputs[-1]`.
-
-        Returns a :class:`torch.utils.hooks.RemovableHandle` that can be used
-        to remove the added hook by calling :obj:`handle.remove()`.
-        """
+       
+        # 创建一个 RemovableHandle 对象，这个对象用于管理和移除钩子
         handle = RemovableHandle(self._propagate_forward_pre_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_propagate_forward_pre_hooks` 字典中
+        # 键是钩子的唯一 ID，值是钩子本身
         self._propagate_forward_pre_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法来移除这个钩子
         return handle
 
-    def register_propagate_forward_hook(
-        self,
-        hook: Callable,
-    ) -> RemovableHandle:
-        r"""Registers a forward hook on the module.
 
-        The hook will be called every time after :meth:`propagate` has computed
-        an output.
-        It should have the following signature:
-
-        .. code-block:: python
-
-            hook(module, inputs, output) -> None or modified output
-
-        The hook can modify the output.
-        Input keyword arguments are passed to the hook as a dictionary in
-        :obj:`inputs[-1]`.
-
-        Returns a :class:`torch.utils.hooks.RemovableHandle` that can be used
-        to remove the added hook by calling :obj:`handle.remove()`.
-        """
+       def register_propagate_forward_hook(
+            self,
+            hook: Callable,
+        ) -> RemovableHandle:
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._propagate_forward_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_propagate_forward_hooks` 字典中
         self._propagate_forward_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
     def register_message_forward_pre_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward pre-hook on the module.
-        The hook will be called every time before :meth:`message` is invoked.
-        See :meth:`register_propagate_forward_pre_hook` for more information.
-        """
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._message_forward_pre_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_message_forward_pre_hooks` 字典中
         self._message_forward_pre_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
     def register_message_forward_hook(self, hook: Callable) -> RemovableHandle:
-        r"""Registers a forward hook on the module.
-        The hook will be called every time after :meth:`message` has computed
-        an output.
-        See :meth:`register_propagate_forward_hook` for more information.
-        """
+       
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._message_forward_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_message_forward_hooks` 字典中
         self._message_forward_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
+
 
     def register_aggregate_forward_pre_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward pre-hook on the module.
-        The hook will be called every time before :meth:`aggregate` is invoked.
-        See :meth:`register_propagate_forward_pre_hook` for more information.
-        """
+       
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._aggregate_forward_pre_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_aggregate_forward_pre_hooks` 字典中
         self._aggregate_forward_pre_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
-    def register_aggregate_forward_hook(
+
+   def register_aggregate_forward_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward hook on the module.
-        The hook will be called every time after :meth:`aggregate` has computed
-        an output.
-        See :meth:`register_propagate_forward_hook` for more information.
-        """
+       
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._aggregate_forward_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_aggregate_forward_hooks` 字典中
         self._aggregate_forward_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
     def register_message_and_aggregate_forward_pre_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward pre-hook on the module.
-        The hook will be called every time before :meth:`message_and_aggregate`
-        is invoked.
-        See :meth:`register_propagate_forward_pre_hook` for more information.
-        """
+        
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._message_and_aggregate_forward_pre_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_message_and_aggregate_forward_pre_hooks` 字典中
         self._message_and_aggregate_forward_pre_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
     def register_message_and_aggregate_forward_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward hook on the module.
-        The hook will be called every time after :meth:`message_and_aggregate`
-        has computed an output.
-        See :meth:`register_propagate_forward_hook` for more information.
-        """
+        
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._message_and_aggregate_forward_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_message_and_aggregate_forward_hooks` 字典中
         self._message_and_aggregate_forward_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
+
 
     def register_edge_update_forward_pre_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward pre-hook on the module.
-        The hook will be called every time before :meth:`edge_update` is
-        invoked. See :meth:`register_propagate_forward_pre_hook` for more
-        information.
-        """
+        
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._edge_update_forward_pre_hooks)
+        # 将钩子函数 `hook` 添加到 `_edge_update_forward_pre_hooks` 字典中
         self._edge_update_forward_pre_hooks[handle.id] = hook
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
-    def register_edge_update_forward_hook(
+
+   def register_edge_update_forward_hook(
         self,
         hook: Callable,
     ) -> RemovableHandle:
-        r"""Registers a forward hook on the module.
-        The hook will be called every time after :meth:`edge_update` has
-        computed an output.
-        See :meth:`register_propagate_forward_hook` for more information.
-        """
+
+        # 创建一个 RemovableHandle 对象，用于管理和移除钩子
         handle = RemovableHandle(self._edge_update_forward_hooks)
+        
+        # 将钩子函数 `hook` 添加到 `_edge_update_forward_hooks` 字典中
         self._edge_update_forward_hooks[handle.id] = hook
+        
+        # 返回 RemovableHandle，使得外部可以通过 `handle.remove()` 方法移除钩子
         return handle
 
     # TorchScript Support #####################################################
