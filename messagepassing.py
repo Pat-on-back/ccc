@@ -520,58 +520,61 @@ class MessagePassing(torch.nn.Module):
         return out
 
 
-    def message(self, x_j: Tensor) -> Tensor:
-        r"""Constructs messages from node :math:`j` to node :math:`i`
-        in analogy to :math:`\phi_{\mathbf{\Theta}}` for each edge in
-        :obj:`edge_index`.
-        This function can take any argument as input which was initially
-        passed to :meth:`propagate`.
-        Furthermore, tensors passed to :meth:`propagate` can be mapped to the
-        respective nodes :math:`i` and :math:`j` by appending :obj:`_i` or
-        :obj:`_j` to the variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`.
+    def message(self, x_j: Tensor) -> Tensor: 
+        r"""构建从节点 :math:`j` 到节点 :math:`i` 的消息
+        该函数可以接收任何作为参数传递给 :meth:`propagate` 方法的输入。
+        此外，通过在变量名后添加 :obj:`_i` 或 :obj:`_j`，例如 :obj:`x_i` 和 :obj:`x_j`，
+        可以将传递给 :meth:`propagate` 的张量映射到相应的节点 :math:`i` 或 :math:`j`。
+        
+        该函数的作用是从邻居节点 `j` 向当前节点 `i` 传递信息（消息）。
+        目前在这个实现中，它只是简单地返回 `x_j`，即直接传递 `j` 节点的特征。
         """
         return x_j
 
+
     def aggregate(
-        self,
-        inputs: Tensor,
-        index: Tensor,
-        ptr: Optional[Tensor] = None,
-        dim_size: Optional[int] = None,
-    ) -> Tensor:
-        r"""Aggregates messages from neighbors as
-        :math:`\bigoplus_{j \in \mathcal{N}(i)}`.
-
-        Takes in the output of message computation as first argument and any
-        argument which was initially passed to :meth:`propagate`.
-
-        By default, this function will delegate its call to the underlying
-        :class:`~torch_geometric.nn.aggr.Aggregation` module to reduce messages
-        as specified in :meth:`__init__` by the :obj:`aggr` argument.
+    self,
+    inputs: Tensor,
+    index: Tensor,
+    ptr: Optional[Tensor] = None,
+    dim_size: Optional[int] = None,
+) -> Tensor:
+        r"""聚合来自邻居节点的消息
+        该函数接收消息计算的输出作为第一个参数，并且可以接收
+        任何传递给 :meth:`propagate` 的参数。
+        默认情况下，该函数会将调用委托给底层的 
+        :class:`~torch_geometric.nn.aggr.Aggregation` 模块，
+        以根据 :meth:`__init__` 中通过 :obj:`aggr` 参数指定的聚合方式来减少消息。
         """
         return self.aggr_module(inputs, index, ptr=ptr, dim_size=dim_size,
                                 dim=self.node_dim)
+    
 
     @abstractmethod
     def message_and_aggregate(self, edge_index: Adj) -> Tensor:
-        r"""Fuses computations of :func:`message` and :func:`aggregate` into a
-        single function.
-        If applicable, this saves both time and memory since messages do not
-        explicitly need to be materialized.
-        This function will only gets called in case it is implemented and
-        propagation takes place based on a :obj:`torch_sparse.SparseTensor`
-        or a :obj:`torch.sparse.Tensor`.
+        r"""将 :func:`message` 和 :func:`aggregate` 的计算融合为一个函数。
+    
+        这样做可以节省时间和内存，因为消息不需要显式地被构建（materialized）。
+        如果适用，消息的计算会直接在传递过程中进行，从而避免中间步骤。
+    
+        该函数只有在实现时才会被调用，且传播操作必须基于 :obj:`torch_sparse.SparseTensor`
+        或 :obj:`torch.sparse.Tensor`（即稀疏张量）。
         """
         raise NotImplementedError
 
+
     def update(self, inputs: Tensor) -> Tensor:
-        r"""Updates node embeddings in analogy to
-        :math:`\gamma_{\mathbf{\Theta}}` for each node
-        :math:`i \in \mathcal{V}`.
-        Takes in the output of aggregation as first argument and any argument
-        which was initially passed to :meth:`propagate`.
+        r"""更新每个节点的嵌入，类似于
+        :math:`\gamma_{\mathbf{\Theta}}` 对于每个节点
+        :math:`i \in \mathcal{V}`。
+        该函数接收聚合操作后的输出作为第一个参数，并且可以接收
+        任何传递给 :meth:`propagate` 的参数。
+    
+        默认情况下，这个函数直接返回聚合后的输入，
+        但在实际应用中可以通过对输入进行非线性变换等操作来更新节点的嵌入。
         """
         return inputs
+
 
     # Edge-level Updates ######################################################
 
@@ -581,118 +584,150 @@ class MessagePassing(torch.nn.Module):
         size: Size = None,
         **kwargs: Any,
     ) -> Tensor:
-        r"""The initial call to compute or update features for each edge in the
-        graph.
-
-        Args:
-            edge_index (torch.Tensor or SparseTensor): A :obj:`torch.Tensor`, a
-                :class:`torch_sparse.SparseTensor` or a
-                :class:`torch.sparse.Tensor` that defines the underlying graph
-                connectivity/message passing flow.
-                See :meth:`propagate` for more information.
-            size ((int, int), optional): The size :obj:`(N, M)` of the
-                assignment matrix in case :obj:`edge_index` is a
-                :class:`torch.Tensor`.
-                If set to :obj:`None`, the size will be automatically inferred
-                and assumed to be quadratic.
-                This argument is ignored in case :obj:`edge_index` is a
-                :class:`torch_sparse.SparseTensor` or
-                a :class:`torch.sparse.Tensor`. (default: :obj:`None`)
-            **kwargs: Any additional data which is needed to compute or update
-                features for each edge in the graph.
+        r"""计算或更新图中每条边的特征（嵌入）。
+        参数：
+            edge_index (torch.Tensor 或 SparseTensor): 一个表示图的连接性或消息传递流的边索引，
+            size ((int, int), 可选): 当 `edge_index` 是一个 :obj:`torch.Tensor` 时，
+                这是分配矩阵的大小 :obj:`(N, M)`。
+                如果设置为 :obj:`None`，则会自动推断大小并假设其为方阵。
+                如果 `edge_index` 是稀疏张量类型，则此参数会被忽略。
+                (默认值: :obj:`None`)
+            **kwargs: 计算或更新图中每条边特征所需的其他数据。
         """
+        # 执行边更新前的钩子函数
         for hook in self._edge_update_forward_pre_hooks.values():
             res = hook(self, (edge_index, size, kwargs))
             if res is not None:
                 edge_index, size, kwargs = res
-
+    
+        # 检查输入的有效性
         mutable_size = self._check_input(edge_index, size=None)
-
+    
+        # 收集用于边更新的用户参数
         coll_dict = self._collect(self._edge_user_args, edge_index,
                                   mutable_size, kwargs)
-
+    
+        # 从收集的参数中获取边更新所需的数据
         edge_kwargs = self.inspector.collect_param_data(
             'edge_update', coll_dict)
+    
+        # 调用边更新方法，计算或更新边特征
         out = self.edge_update(**edge_kwargs)
-
+    
+        # 执行边更新后的钩子函数
         for hook in self._edge_update_forward_hooks.values():
             res = hook(self, (edge_index, size, kwargs), out)
             if res is not None:
                 out = res
-
+    
         return out
 
     @abstractmethod
     def edge_update(self) -> Tensor:
-        r"""Computes or updates features for each edge in the graph.
-        This function can take any argument as input which was initially passed
-        to :meth:`edge_updater`.
-        Furthermore, tensors passed to :meth:`edge_updater` can be mapped to
-        the respective nodes :math:`i` and :math:`j` by appending :obj:`_i` or
-        :obj:`_j` to the variable name, *.e.g.* :obj:`x_i` and :obj:`x_j`.
+        r"""计算或更新图中每条边的特征。
+        该函数可以接受传递给 :meth:`edge_updater` 的任何参数作为输入。
+        此外，传递给 :meth:`edge_updater` 的张量可以通过将变量名后缀加上 
+        :obj:`_i` 或 :obj:`_j` 来映射到相应的节点 :math:`i` 和 :math:`j`
         """
         raise NotImplementedError
+
 
     # Inference Decomposition #################################################
 
     @property
     def decomposed_layers(self) -> int:
+        # 这是属性方法，返回当前的分解层次值
         return self._decomposed_layers
-
+    
     @decomposed_layers.setter
     def decomposed_layers(self, decomposed_layers: int) -> None:
+        # 设置分解层次时的操作
+    
+        # 如果当前是在 JIT 脚本模式下，抛出异常
+        # 因为推理分解功能不支持 JIT 脚本模式
         if torch.jit.is_scripting():
             raise ValueError("Inference decomposition of message passing "
                              "modules is only supported on the Python module")
-
+    
+        # 如果传入的分解层次与当前值相同，直接返回，避免无用的计算
         if decomposed_layers == self._decomposed_layers:
             return  # Abort early if nothing to do.
-
+    
+        # 更新 _decomposed_layers 为新的值
         self._decomposed_layers = decomposed_layers
-
+    
+        # 如果分解层次不等于 1，恢复原始的 propagate 方法
+        # 这意味着使用原始的消息传递实现
         if decomposed_layers != 1:
             if hasattr(self.__class__, '_orig_propagate'):
+                # 恢复 propagate 方法为原始的 _orig_propagate 方法
                 self.propagate = self.__class__._orig_propagate.__get__(
                     self, MessagePassing)
-
+    
+        # 如果分解层次为 1，并且 `explain` 为 None 或 False，选择使用 jinja_propagate
+        # 这可能是用于调试或解释的替代实现
         elif self.explain is None or self.explain is False:
             if hasattr(self.__class__, '_jinja_propagate'):
+                # 设置 propagate 为 _jinja_propagate 方法
                 self.propagate = self.__class__._jinja_propagate.__get__(
                     self, MessagePassing)
+
 
     # Explainability ##########################################################
 
     @property
     def explain(self) -> Optional[bool]:
+        # 这是一个属性方法，用于获取 `_explain` 的值。
+        # 它返回一个布尔值，指示当前是否启用了可解释性。
         return self._explain
-
+    
     @explain.setter
     def explain(self, explain: Optional[bool]) -> None:
+        # 这是一个 setter 方法，用于设置 `_explain` 的值。
+        # 它根据传入的 `explain` 参数决定是否启用可解释性。
+        
+        # 检查当前是否是 TorchScript 编译模式。如果是，抛出异常。
+        # 说明：PyTorch 的 TorchScript 模式不支持启用消息传递模块的可解释性。
         if torch.jit.is_scripting():
             raise ValueError("Explainability of message passing modules "
                              "is only supported on the Python module")
-
+    
+        # 如果新设置的 `explain` 和当前的 `_explain` 相同，直接返回，无需进行进一步操作
         if explain == self._explain:
             return  # Abort early if nothing to do.
-
+    
+        # 更新 `_explain` 为传入的值
         self._explain = explain
-
+    
+        # 如果启用了可解释性 (explain == True)
         if explain is True:
+            # 确保当前的分解层数为 1。因为可解释性需要层数为 1，否则会有不一致。
             assert self.decomposed_layers == 1
+            
+            # 移除先前的签名并开始新的签名检查
             self.inspector.remove_signature(self.explain_message)
             self.inspector.inspect_signature(self.explain_message, exclude=[0])
+            
+            # 获取 "message"、"explain_message"、"aggregate" 和 "update" 方法中的参数名，
+            # 并将这些参数名平展以便后续分析。
             self._user_args = self.inspector.get_flat_param_names(
                 funcs=['message', 'explain_message', 'aggregate', 'update'],
                 exclude=self.special_args,
             )
+    
+            # 如果类中有 `_orig_propagate`，则恢复 `propagate` 方法为原始方法
             if hasattr(self.__class__, '_orig_propagate'):
                 self.propagate = self.__class__._orig_propagate.__get__(
                     self, MessagePassing)
         else:
+            # 如果禁用可解释性 (explain == False)
+            # 重新获取 "message"、"aggregate" 和 "update" 方法的参数名，并展平这些参数
             self._user_args = self.inspector.get_flat_param_names(
                 funcs=['message', 'aggregate', 'update'],
                 exclude=self.special_args,
             )
+            
+            # 如果分解层数为 1，恢复 `propagate` 为 `jinja_propagate` 方法
             if self.decomposed_layers == 1:
                 if hasattr(self.__class__, '_jinja_propagate'):
                     self.propagate = self.__class__._jinja_propagate.__get__(
