@@ -926,79 +926,97 @@ class MessagePassing(torch.nn.Module):
     # TorchScript Support #####################################################
 
     def _set_jittable_templates(self, raise_on_error: bool = False) -> None:
+        # 获取当前文件的根目录
         root_dir = osp.dirname(osp.realpath(__file__))
+        
+        # 定义 Jinja 模板的前缀，基于模块名和类名
         jinja_prefix = f'{self.__module__}_{self.__class__.__name__}'
-        # Optimize `propagate()` via `*.jinja` templates:
+    
+        # 优化 `propagate()` 方法，通过 `*.jinja` 模板
         if not self.propagate.__module__.startswith(jinja_prefix):
             try:
+                # 如果 `propagate` 方法被重写，并且不是 `MessagePassing.propagate` 方法，
+                # 则抛出异常，因为自定义方法无法编译
                 if ('propagate' in self.__class__.__dict__
                         and self.__class__.__dict__['propagate']
                         != MessagePassing.propagate):
-                    raise ValueError("Cannot compile custom 'propagate' "
-                                     "method")
-
+                    raise ValueError("Cannot compile custom 'propagate' method")
+    
+                # 生成用于 `propagate` 方法的 Jinja 模板模块
                 module = module_from_template(
-                    module_name=f'{jinja_prefix}_propagate',
-                    template_path=osp.join(root_dir, 'propagate.jinja'),
-                    tmp_dirname='message_passing',
-                    # Keyword arguments:
-                    modules=self.inspector._modules,
-                    collect_name='collect',
-                    signature=self._get_propagate_signature(),
+                    module_name=f'{jinja_prefix}_propagate',  # 模块名称
+                    template_path=osp.join(root_dir, 'propagate.jinja'),  # 模板文件路径
+                    tmp_dirname='message_passing',  # 临时目录
+                    # 关键字参数：
+                    modules=self.inspector._modules,  # 模块
+                    collect_name='collect',  # 收集器名称
+                    signature=self._get_propagate_signature(),  # 获取 `propagate` 的签名
                     collect_param_dict=self.inspector.get_flat_param_dict(
-                        ['message', 'aggregate', 'update']),
-                    message_args=self.inspector.get_param_names('message'),
-                    aggregate_args=self.inspector.get_param_names('aggregate'),
+                        ['message', 'aggregate', 'update']),  # 获取相关参数字典
+                    message_args=self.inspector.get_param_names('message'),  # `message` 参数
+                    aggregate_args=self.inspector.get_param_names('aggregate'),  # `aggregate` 参数
                     message_and_aggregate_args=self.inspector.get_param_names(
-                        'message_and_aggregate'),
-                    update_args=self.inspector.get_param_names('update'),
-                    fuse=self.fuse,
+                        'message_and_aggregate'),  # `message_and_aggregate` 参数
+                    update_args=self.inspector.get_param_names('update'),  # `update` 参数
+                    fuse=self.fuse,  # fuse 参数
                 )
-
+    
+                # 将原始的 `propagate` 方法保存到类的 `_orig_propagate` 属性
                 self.__class__._orig_propagate = self.__class__.propagate
+                # 将 Jinja 优化后的 `propagate` 方法保存到类的 `_jinja_propagate` 属性
                 self.__class__._jinja_propagate = module.propagate
-
+    
+                # 将 `propagate` 方法替换为优化后的版本
                 self.__class__.propagate = module.propagate
+                # 将 `collect` 方法替换为模板中的 `collect`
                 self.__class__.collect = module.collect
             except Exception as e:  # pragma: no cover
+                # 如果发生异常，根据 `raise_on_error` 标志决定是否抛出异常
                 if raise_on_error:
                     raise e
+                # 恢复原始方法
                 self.__class__._orig_propagate = self.__class__.propagate
                 self.__class__._jinja_propagate = self.__class__.propagate
 
-        # Optimize `edge_updater()` via `*.jinja` templates (if implemented):
+        # 优化 `edge_updater()` 方法，通过 `*.jinja` 模板（如果实现了 `edge_update`）
         if (self.inspector.implements('edge_update')
                 and not self.edge_updater.__module__.startswith(jinja_prefix)):
             try:
+                # 如果 `edge_updater` 方法被重写，并且不是 `MessagePassing.edge_updater` 方法，
+                # 则抛出异常，因为自定义方法无法编译
                 if ('edge_updater' in self.__class__.__dict__
                         and self.__class__.__dict__['edge_updater']
                         != MessagePassing.edge_updater):
-                    raise ValueError("Cannot compile custom 'edge_updater' "
-                                     "method")
-
+                    raise ValueError("Cannot compile custom 'edge_updater' method")
+    
+                # 生成用于 `edge_updater` 方法的 Jinja 模板模块
                 module = module_from_template(
-                    module_name=f'{jinja_prefix}_edge_updater',
-                    template_path=osp.join(root_dir, 'edge_updater.jinja'),
-                    tmp_dirname='message_passing',
-                    # Keyword arguments:
-                    modules=self.inspector._modules,
-                    collect_name='edge_collect',
-                    signature=self._get_edge_updater_signature(),
+                    module_name=f'{jinja_prefix}_edge_updater',  # 模块名称
+                    template_path=osp.join(root_dir, 'edge_updater.jinja'),  # 模板文件路径
+                    tmp_dirname='message_passing',  # 临时目录
+                    # 关键字参数：
+                    modules=self.inspector._modules,  # 模块
+                    collect_name='edge_collect',  # 收集器名称
+                    signature=self._get_edge_updater_signature(),  # 获取 `edge_updater` 的签名
                     collect_param_dict=self.inspector.get_param_dict(
-                        'edge_update'),
+                        'edge_update'),  # 获取 `edge_update` 的参数字典
                 )
-
+                # 将原始的 `edge_updater` 方法保存到类的 `_orig_edge_updater` 属性
                 self.__class__._orig_edge_updater = self.__class__.edge_updater
+                # 将 Jinja 优化后的 `edge_updater` 方法保存到类的 `_jinja_edge_updater` 属性
                 self.__class__._jinja_edge_updater = module.edge_updater
-
+    
+                # 将 `edge_updater` 方法替换为优化后的版本
                 self.__class__.edge_updater = module.edge_updater
+                # 将 `edge_collect` 方法替换为模板中的 `edge_collect`
                 self.__class__.edge_collect = module.edge_collect
             except Exception as e:  # pragma: no cover
+                # 如果发生异常，根据 `raise_on_error` 标志决定是否抛出异常
                 if raise_on_error:
                     raise e
+                # 恢复原始方法
                 self.__class__._orig_edge_updater = self.__class__.edge_updater
-                self.__class__._jinja_edge_updater = (
-                    self.__class__.edge_updater)
+                self.__class__._jinja_edge_updater = self.__class__.edge_updater
 
     def _get_propagate_signature(self) -> Signature:
         param_dict = self.inspector.get_params_from_method_call(
