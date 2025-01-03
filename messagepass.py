@@ -37,66 +37,7 @@ HookDict = OrderedDict[int, Callable]
 
 
 class MessagePassing(torch.nn.Module):
-    r"""Base class for creating message passing layers.
-
-    Message passing layers follow the form
-
-    .. math::
-        \mathbf{x}_i^{\prime} = \gamma_{\mathbf{\Theta}} \left( \mathbf{x}_i,
-        \bigoplus_{j \in \mathcal{N}(i)} \, \phi_{\mathbf{\Theta}}
-        \left(\mathbf{x}_i, \mathbf{x}_j,\mathbf{e}_{j,i}\right) \right),
-
-    where :math:`\bigoplus` denotes a differentiable, permutation invariant
-    function, *e.g.*, sum, mean, min, max or mul, and
-    :math:`\gamma_{\mathbf{\Theta}}` and :math:`\phi_{\mathbf{\Theta}}` denote
-    differentiable functions such as MLPs.
-    See `here <https://pytorch-geometric.readthedocs.io/en/latest/tutorial/
-    create_gnn.html>`__ for the accompanying tutorial.
-
-    Args:
-        aggr (str or [str] or Aggregation, optional): The aggregation scheme
-            to use, *e.g.*, :obj:`"sum"` :obj:`"mean"`, :obj:`"min"`,
-            :obj:`"max"` or :obj:`"mul"`.
-            In addition, can be any
-            :class:`~torch_geometric.nn.aggr.Aggregation` module (or any string
-            that automatically resolves to it).
-            If given as a list, will make use of multiple aggregations in which
-            different outputs will get concatenated in the last dimension.
-            If set to :obj:`None`, the :class:`MessagePassing` instantiation is
-            expected to implement its own aggregation logic via
-            :meth:`aggregate`. (default: :obj:`"add"`)
-        aggr_kwargs (Dict[str, Any], optional): Arguments passed to the
-            respective aggregation function in case it gets automatically
-            resolved. (default: :obj:`None`)
-        flow (str, optional): The flow direction of message passing
-            (:obj:`"source_to_target"` or :obj:`"target_to_source"`).
-            (default: :obj:`"source_to_target"`)
-        node_dim (int, optional): The axis along which to propagate.
-            (default: :obj:`-2`)
-        decomposed_layers (int, optional): The number of feature decomposition
-            layers, as introduced in the `"Optimizing Memory Efficiency of
-            Graph Neural Networks on Edge Computing Platforms"
-            <https://arxiv.org/abs/2104.03058>`_ paper.
-            Feature decomposition reduces the peak memory usage by slicing
-            the feature dimensions into separated feature decomposition layers
-            during GNN aggregation.
-            This method can accelerate GNN execution on CPU-based platforms
-            (*e.g.*, 2-3x speedup on the
-            :class:`~torch_geometric.datasets.Reddit` dataset) for common GNN
-            models such as :class:`~torch_geometric.nn.models.GCN`,
-            :class:`~torch_geometric.nn.models.GraphSAGE`,
-            :class:`~torch_geometric.nn.models.GIN`, etc.
-            However, this method is not applicable to all GNN operators
-            available, in particular for operators in which message computation
-            can not easily be decomposed, *e.g.* in attention-based GNNs.
-            The selection of the optimal value of :obj:`decomposed_layers`
-            depends both on the specific graph dataset and available hardware
-            resources.
-            A value of :obj:`2` is suitable in most cases.
-            Although the peak memory usage is directly associated with the
-            granularity of feature decomposition, the same is not necessarily
-            true for execution speedups. (default: :obj:`1`)
-    """
+    
 
     special_args: Set[str] = {
         'edge_index', 'adj_t', 'edge_index_i', 'edge_index_j', 'size',
@@ -206,10 +147,8 @@ class MessagePassing(torch.nn.Module):
         edge_index: Union[Tensor, SparseTensor],
         size: Optional[Tuple[Optional[int], Optional[int]]],
     ) -> List[Optional[int]]:
-
         if not torch.jit.is_scripting() and isinstance(edge_index, EdgeIndex):
             return [edge_index.num_rows, edge_index.num_cols]
-
         if is_sparse(edge_index):
             if self.flow == 'target_to_source':
                 raise ValueError(
@@ -219,15 +158,12 @@ class MessagePassing(torch.nn.Module):
                     'use of a reverse message passing flow, pass in the '
                     'transposed sparse tensor to the message passing module, '
                     'e.g., `adj_t.t()`.')
-
             if isinstance(edge_index, SparseTensor):
                 return [edge_index.size(1), edge_index.size(0)]
             return [edge_index.size(1), edge_index.size(0)]
-
         elif isinstance(edge_index, Tensor):
             int_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32,
                           torch.int64)
-
             if edge_index.dtype not in int_dtypes:
                 raise ValueError(f"Expected 'edge_index' to be of integer "
                                  f"type (got '{edge_index.dtype}')")
@@ -238,9 +174,7 @@ class MessagePassing(torch.nn.Module):
                 raise ValueError(f"Expected 'edge_index' to have size '2' in "
                                  f"the first dimension (got "
                                  f"'{edge_index.size(0)}')")
-
             return list(size) if size is not None else [None, None]
-
         raise ValueError(
             '`MessagePassing.propagate` only supports integer tensors of '
             'shape `[2, num_messages]`, `torch_sparse.SparseTensor` or '
@@ -424,38 +358,7 @@ class MessagePassing(torch.nn.Module):
         size: Size = None,
         **kwargs: Any,
     ) -> Tensor:
-        r"""The initial call to start propagating messages.
-
-        Args:
-            edge_index (torch.Tensor or SparseTensor): A :class:`torch.Tensor`,
-                a :class:`torch_sparse.SparseTensor` or a
-                :class:`torch.sparse.Tensor` that defines the underlying
-                graph connectivity/message passing flow.
-                :obj:`edge_index` holds the indices of a general (sparse)
-                assignment matrix of shape :obj:`[N, M]`.
-                If :obj:`edge_index` is a :obj:`torch.Tensor`, its :obj:`dtype`
-                should be :obj:`torch.long` and its shape needs to be defined
-                as :obj:`[2, num_messages]` where messages from nodes in
-                :obj:`edge_index[0]` are sent to nodes in :obj:`edge_index[1]`
-                (in case :obj:`flow="source_to_target"`).
-                If :obj:`edge_index` is a :class:`torch_sparse.SparseTensor` or
-                a :class:`torch.sparse.Tensor`, its sparse indices
-                :obj:`(row, col)` should relate to :obj:`row = edge_index[1]`
-                and :obj:`col = edge_index[0]`.
-                The major difference between both formats is that we need to
-                input the *transposed* sparse adjacency matrix into
-                :meth:`propagate`.
-            size ((int, int), optional): The size :obj:`(N, M)` of the
-                assignment matrix in case :obj:`edge_index` is a
-                :class:`torch.Tensor`.
-                If set to :obj:`None`, the size will be automatically inferred
-                and assumed to be quadratic.
-                This argument is ignored in case :obj:`edge_index` is a
-                :class:`torch_sparse.SparseTensor` or
-                a :class:`torch.sparse.Tensor`. (default: :obj:`None`)
-            **kwargs: Any additional data which is needed to construct and
-                aggregate messages, and to update node embeddings.
-        """
+       
         decomposed_layers = 1 if self.explain else self.decomposed_layers
 
         for hook in self._propagate_forward_pre_hooks.values():
